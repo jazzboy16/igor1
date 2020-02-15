@@ -1,0 +1,285 @@
+# -*- coding: utf-8 -*-
+import json
+import random
+import re
+import time
+
+import pytils
+import requests
+import xlsxwriter
+from bs4 import BeautifulSoup, Tag
+
+
+# Режим отладки.
+# Если включен (True), то будет собираться только одна страница результатов и одно объявление.
+# Если выключен (False), то будет собираться вся информация.
+DEBUG = False
+
+# Система обхода капчи
+# Cоздает эмуляю обращения к сайту 11 разных пользователей с разных браузеров, операционных систем и устройств
+def get_random_user_agent():
+    user_agents = [
+        'Mozilla/5.0 (Linux; Android 8.0.0; SM-G960F Build/R16NW) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/62.0.3202.84 Mobile Safari/537.36',
+        'Mozilla/5.0 (Linux; Android 7.0; SM-G930VC Build/NRD90M; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/58.0.3029.83 Mobile Safari/537.36',
+        'Mozilla/5.0 (Linux; Android 6.0.1; SM-G935S Build/MMB29K; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/55.0.2883.91 Mobile Safari/537.36',
+        'Mozilla/5.0 (Linux; Android 6.0.1; Nexus 6P Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/47.0.2526.83 Mobile Safari/537.36',
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 12_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/12.0 Mobile/15E148 Safari/604.1',
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 11_0 like Mac OS X) AppleWebKit/604.1.38 (KHTML, like Gecko) Version/11.0 Mobile/15A372 Safari/604.1',
+        'Mozilla/5.0 (Linux; Android 5.0.2; SAMSUNG SM-T550 Build/LRX22G) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/3.3 Chrome/38.0.2125.102 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/42.0.2311.135 Safari/537.36 Edge/12.246',
+        'Mozilla/5.0 (X11; CrOS x86_64 8172.45.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.64 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_2) AppleWebKit/601.3.9 (KHTML, like Gecko) Version/9.0.2 Safari/601.3.9',
+        'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/47.0.2526.111 Safari/537.36',
+    ]
+    return random.choice(user_agents)
+
+
+def make_delay(a=1.0, b=3.0):
+    """
+    Функция задержки, для снижения нагрузки на обрабатываемый сайт.
+    Выполнение программы задерживается на случайное значение от a до b.
+
+    :param a:       левое граничное значение.
+    :param b:       правое граничное значение.
+    :return:
+    """
+    delay = random.uniform(a, b)
+    print('Задержка: {:.2f} сек.'.format(delay))
+    time.sleep(delay)
+
+
+def parse_hicentral(dump_filename='dump_hicentral_ads.json'):
+    """
+    Парсер сайта propertysearch.hicentral.com
+    Обходит все страницы по очереди с объявлениями,
+    затем обходит все объявления и забирает с каждого следующие значения (в скобках указан соответствующий ключ):
+
+    - адрес (address);
+    - цена (price);
+    - тип недвижимости (property_type);
+    - ссылка на объявление (url);
+    - List Date (list_date).
+
+    :param dump_filename:       имя файла, куда сохранятся словари объявлений.
+    :return:                    список всех объявлений, каждое объявление - словарь.
+    """
+    domain = 'https://propertysearch.hicentral.com'
+    ad_urls = []
+    ads = []
+
+    url = '{}/HBR/ForSale/?/Results/HotSheet//1//'.format(domain)
+
+    print('Начинаем парсинг страниц')
+    page_n = 1
+    while True:
+        make_delay()
+        print('Парсинг страницы: {}'.format(page_n))
+
+        html = requests.get(url).text
+        soup = BeautifulSoup(html, features='html.parser')
+
+        # Собираем ссылки на объявления.
+        anchors = soup.select('div.P-Results1 > span > a')
+        ad_urls.extend(
+            ['{}/HBR/ForSale/{}'.format(domain, a.attrs['href']) for a in anchors]
+        )
+
+        if DEBUG:
+            break
+
+        # Если есть кнопка «next», то переходим к следующей странице.
+        next_btn = soup.find('a', {'id': 'ctl00_main_ctl00_haNextTop'})
+        if next_btn:
+            url = '{}{}'.format(domain, next_btn.attrs['href'])
+            page_n += 1
+        # Если нет, то завершаем цикл.
+        else:
+            break
+
+    print('Парсинг страниц с объявлениями завершен, всего ссылок: {}'.format(len(ad_urls)))
+
+    print('\nНачинаем парсинг объявлений')
+    for url in ad_urls:
+        make_delay()
+        print('Парсинг объявления: {}'.format(url))
+
+        # Получаем HTML страницы объявления и...
+        html = requests.get(url).content
+        # подготавливаем его к парсингу с помощью библиотеки beautifulsoup4
+        soup = BeautifulSoup(html, features='html.parser')
+
+        # Адрес.
+        # Удаляем ненужную нам часть заголовка, оставляем только адрес.
+        if soup.h2.nobr is not None:
+            soup.h2.nobr.decompose()
+        address = soup.h2.encode_contents().decode('utf-8').replace('<br/>', ' ').strip()
+
+        # Цена.
+        price = soup.select('div.price > span.P-Active')
+        price = price[0].text if len(price) else None
+
+        # Ищем тип недвижимости и List Date среди всех строк всех блоков div.column-block > div.column2.
+        # Это значение будет хранить левую колонку в таблице значений. Например:
+        # "Property Type:", "Bedrooms:" или "Parking Stalls:".
+        # Чтобы понять очередное значение из правой колонки к чему относится. Нам тут нужно два значения:
+        # Тип недвижимости и List Date.
+        # Соответственно, эта переменная «Тип недвижимости»
+        property_type = None
+        # А эта переменная «List Date»
+        list_date = None
+        previous_header = None
+        # Собираем все таблицы/блоки (их несколько)
+        for elm in soup.select('div#content > div.column-block > div.column2 > dl'):
+            # В них собираем только теги dt, dd. Порядок сохраняется.
+            # dt - это название, dd - само значение.
+            tags = [t for t in elm if type(t) is Tag and t.name in ('dt', 'dd',)]
+            # Проходим по очереди по ячейкам: заголовок, значение, заголовок, значение и тд.
+            for tag in tags:
+                # Заголовок - тег dt.
+                if tag.name == 'dt':
+                    previous_header = tag.text
+                # Если это тег dd (значение).
+                elif previous_header == 'Property Type:':
+                    # Если это значение «Тип недвижимости»
+                    property_type = tag.text
+                elif previous_header == 'List Date:':
+                    # Или если это значение «List Date»
+                    list_date = tag.text
+            if property_type is not None and list_date is not None:
+                break
+
+        # Добавляем словарь к общему списку объявлений.
+        ads.append({
+            'address': address,
+            'price': price,
+            'property_type': property_type,
+            'url': url,
+            'list_date': list_date,
+        })
+
+        if DEBUG and len(ads) >= 20:
+            break
+
+    # Сохраняем объявления в файл.
+    with open(dump_filename, 'w') as f:
+        json.dump(ads, f, ensure_ascii=False, indent=2)
+    print('Объявления сохранены в файл: {}'.format(dump_filename))
+
+    return ads
+
+
+def parse_zillow(ads, dump_filename='dump_zillow.json'):
+    """
+    Функция парсинга цен Zestimate с сайта zillow.com.
+    Если не удалось найти объявление с текущим адресом, то будет присвоено значение "incorrect address".
+
+    :param ads:                 список объектов (словарей), ключ адреса в словаре– address.
+    :param dump_filename:       имя файла, куда сохранятся словари объявлений с включенными в них Zestimate.
+    :return:                    Zestimate-цена или "incorrect address".
+    """
+    print('\nНачинаем работу с zillow')
+
+    # В цикле проходимся по каждому объявлению.
+    for ad in ads:
+        zestimate_price = None
+        try:
+            make_delay(3.0, 5.0)
+            print('Обрабатываем адрес: {}'.format(ad['address']))
+
+            address_slug = pytils.translit.slugify(ad['address']).upper() + '_rb'
+            url = 'https://www.zillow.com/homes/{}'.format(address_slug)
+            # Заголовки для HTTP-запросов к zillow, чтобы обойти защиту.
+            headers = {
+                'accept': '*/*',
+                'accept-encoding': 'gzip, deflate, br',
+                'accept-language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+                # Каждый раз выбирается случайный User-Agent.
+                'User-Agent': get_random_user_agent(),
+            }
+            html = requests.get(url, headers=headers).content
+            soup = BeautifulSoup(html, features='html.parser')
+
+            # Ищем элементы, где может быть Zestimate-цена.
+            spans = soup.select('div.ds-home-details-chip > div.ds-chip-removable-content > p > span > span > span')
+            # Получаем только текст этих элементов.
+            spans = [s.text for s in spans]
+            # Отбираем только те, что начинаются с символа доллара.
+            spans = [s for s in spans if s.startswith('$')]
+            # Если есть цена, сохраняем её.
+            if len(spans) > 0:
+                zestimate_price = spans[0]
+        except Exception as ex:
+            print('Произошла ошибка: {}'.format(ex))
+        # Добавляем цену Zestimate.
+        ad['zestimate_price'] = zestimate_price
+        if zestimate_price:
+            price_int = int(re.sub('[^0-9]','', ad['price']))
+            zestimate_price_int = int(re.sub('[^0-9]','', zestimate_price))
+            ad['delta'] = price_int - zestimate_price_int
+        else:
+            ad['delta'] = None
+
+    # Сохраняем объявления в файл.
+    # Если не нужно, можно убрать, так как есть сохранение всей информации в Excel.
+    with open(dump_filename, 'w') as f:
+        json.dump(ads, f, ensure_ascii=False, indent=2)
+    print('Объявления (после парсинга zillow) сохранены в файл: {}'.format(dump_filename))
+
+    return ads
+
+
+def dump_to_xlsx(ads, xlsx_filename='ads.xlsx'):
+    """
+    Сохранение объявлений в Excel-файл.
+
+    :param ads:                 список объявлений.
+    :param xlsx_filename:       имя Excel-файла для сохранения объявлеиний,
+    :return:
+    """
+    # Создаем книгу (файл).
+    workbook = xlsxwriter.Workbook(xlsx_filename)
+    # Создаем лист.
+    ws = workbook.add_worksheet('List 1')
+
+    # Создаем стиль заголовков.
+    bold = workbook.add_format({'bold': True})
+    headers = (
+        'Ссылка на объявление',
+        'Адрес',
+        'Цена',
+        'Тип недвижимости',
+        'List Date',
+        'Zestimate price',
+        'Разность цен',
+    )
+    # Записываем заголовки.
+    for i, h in enumerate(headers):
+        # 0 - это нулевая строка (те первая), все заголовки расположены в одной строке.
+        ws.write_string(0, i, h, cell_format=bold)
+
+    # row - номер колонки, начиная с единицы.
+    for row, ad in enumerate(ads, start=1):
+        ws.write_string(row, 0, ad['url'])
+        ws.write_string(row, 1, ad['address'])
+        # Если price is None, то выводим пустую строку, потому что при попытке вывода None, будет ошибка.
+        ws.write_string(row, 2, ad['price'] or '')
+        ws.write_string(row, 3, ad['property_type'])
+        ws.write_string(row, 4, ad['list_date'])
+        ws.write_string(row, 5, ad['zestimate_price'] or '')
+        if ad['delta'] is None:
+            ws.write_string(row, 6, 'incorrect address')
+        else:
+            ws.write_string(row, 6, '{:,}'.format(ad['delta']))
+
+    # Закрываем книгу.
+    workbook.close()
+
+
+def main():
+    ads = parse_hicentral()
+    ads = parse_zillow(ads)
+    dump_to_xlsx(ads)
+
+
+if __name__ == '__main__':
+    main()
