@@ -1,20 +1,15 @@
-        property_type = None
-        list_date = None
-        
+        list_status = None
         previous_header = None
         
-        for elm in soup.select('div#content > div.column-block > div.column2 > dl'):
-            tags = [t for t in elm if type(t) is Tag and t.name in ('dt', 'dd',)]
+        for elm in soup.select('div#content > div.heading P-Heading'):
+            tags = [t for t in elm if type(t) is Tag and t.name in ('span', 'div',)]
             for tag in tags:
                 
-                if tag.name == 'dt':
+                if tag.name == 'span':
                     previous_header = tag.text
                 
-                elif previous_header == 'Property Type:':
-                    property_type = tag.text
-                    
-                elif previous_header == 'List Date:':
-                    list_date = tag.text
+                elif previous_header == 'For Sale':
+                    list_status = tag.text
             
-            if property_type is not None and list_date is not None:
+            if list_status is not None:
                 break
