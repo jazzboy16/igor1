@@ -1,6 +1,6 @@
         property_type = None
-        
         list_date = None
+        
         previous_header = None
         
         for elm in soup.select('div#content > div.column-block > div.column2 > dl'):
