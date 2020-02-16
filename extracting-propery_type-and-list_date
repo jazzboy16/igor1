@@ -1,5 +1,6 @@
         property_type = None
         list_date = None
+        island = None
         
         previous_header = None
         
@@ -15,6 +16,9 @@
                     
                 elif previous_header == 'List Date:':
                     list_date = tag.text
+                    
+                 elif previous_header == 'Island:':
+                    island = tag.text
             
-            if property_type is not None and list_date is not None:
+            if property_type is not None and list_date is not None and island is not None:
                 break
