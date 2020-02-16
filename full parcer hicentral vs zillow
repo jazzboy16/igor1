@@ -56,6 +56,7 @@ def parse_hicentral(dump_filename='dump_hicentral_ads.json'):
 
     - адрес (address);
     - цена (price);
+    - List Status (list_status);
     - тип недвижимости (property_type);
     - ссылка на объявление (url);
     - List Date (list_date).
@@ -113,6 +114,9 @@ def parse_hicentral(dump_filename='dump_hicentral_ads.json'):
         if soup.h2.nobr is not None:
             soup.h2.nobr.decompose()
         address = soup.h2.encode_contents().decode('utf-8').replace('<br/>', ' ').strip()
+        
+        # list status
+        list_status = soup.select('div.active-box')
 
         # Цена.
         price = soup.select('div.price > span.P-Active')
@@ -151,6 +155,7 @@ def parse_hicentral(dump_filename='dump_hicentral_ads.json'):
         # Добавляем словарь к общему списку объявлений.
         ads.append({
             'address': address,
+            'list_status': list_status,
             'price': price,
             'property_type': property_type,
             'url': url,
@@ -246,6 +251,7 @@ def dump_to_xlsx(ads, xlsx_filename='ads.xlsx'):
     headers = (
         'Ссылка на объявление',
         'Адрес',
+        'List status',
         'Цена',
         'Тип недвижимости',
         'List Date',
@@ -261,15 +267,16 @@ def dump_to_xlsx(ads, xlsx_filename='ads.xlsx'):
     for row, ad in enumerate(ads, start=1):
         ws.write_string(row, 0, ad['url'])
         ws.write_string(row, 1, ad['address'])
+        ws.write_string(row, 2, ad['list_status'])
         # Если price is None, то выводим пустую строку, потому что при попытке вывода None, будет ошибка.
-        ws.write_string(row, 2, ad['price'] or '')
-        ws.write_string(row, 3, ad['property_type'])
-        ws.write_string(row, 4, ad['list_date'])
-        ws.write_string(row, 5, ad['zestimate_price'] or '')
+        ws.write_string(row, 3, ad['price'] or '')
+        ws.write_string(row, 4, ad['property_type'])
+        ws.write_string(row, 5, ad['list_date'])
+        ws.write_string(row, 6, ad['zestimate_price'] or '')
         if ad['delta'] is None:
-            ws.write_string(row, 6, 'incorrect address')
+            ws.write_string(row, 7, 'incorrect address')
         else:
-            ws.write_string(row, 6, '{:,}'.format(ad['delta']))
+            ws.write_string(row, 7, '{:,}'.format(ad['delta']))
 
     # Закрываем книгу.
     workbook.close()
