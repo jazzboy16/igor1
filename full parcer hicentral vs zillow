@@ -55,7 +55,7 @@ def parse_hicentral(dump_filename='dump_hicentral_ads.json'):
     затем обходит все объявления и забирает с каждого следующие значения (в скобках указан соответствующий ключ):
 
     - адрес (address);
-    - list status
+    - list status (list_status);
     - цена (price);
     - тип недвижимости (property_type);
     - ссылка на объявление (url);
@@ -115,8 +115,9 @@ def parse_hicentral(dump_filename='dump_hicentral_ads.json'):
             soup.h2.nobr.decompose()
         address = soup.h2.encode_contents().decode('utf-8').replace('<br/>', ' ').strip()
         
-        # list price
-        list_price = soup.select('div.active-box')
+        # list status
+        list_status = soup.select('div.active-box')
+        list_status = list_status[0].text if len(list_status) else None
 
         # Цена.
         price = soup.select('div.price > span.P-Active')
